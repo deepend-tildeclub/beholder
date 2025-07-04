@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 
 namespace App\Persistence\Core;
 
@@ -12,106 +13,110 @@ class MySQL extends Base implements PersistenceInterface
 
     public function prepare(): void
     {
-        $this->withDatabaseConnection(function (\PDO $connectionResource) {
-            $this->checkSchema($connectionResource, 'core_schema_version');
-        });
+        $this->withDatabaseConnection(fn (PDO $pdo) =>
+            $this->checkSchema($pdo, 'core_schema_version'));
     }
 
     protected function getSchema(): array
     {
         return [
             1 => [
-                <<< EOD
-                CREATE TABLE `core_channels` (
-                  `id` int(11) NOT NULL AUTO_INCREMENT,
-                  `channel` varchar(255) UNIQUE NOT NULL DEFAULT '',
-                  `created_at` int NOT NULL,
-                  `updated_at` int NOT NULL,
+                <<<SQL
+                CREATE TABLE IF NOT EXISTS `core_channels` (
+                  `id`         INT(11)      NOT NULL AUTO_INCREMENT,
+                  `channel`    VARCHAR(255) UNIQUE NOT NULL,
+                  `created_at` INT          NOT NULL,
+                  `updated_at` INT          NOT NULL,
                   PRIMARY KEY (`id`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin;
-                EOD,
+                ) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_bin;
+                SQL,
+                <<<SQL
+                CREATE TABLE IF NOT EXISTS `behold_channels` (
+                  `channel`    VARCHAR(255) UNIQUE NOT NULL,
+                  `created_at` INT          NOT NULL,
+                  `updated_at` INT          NOT NULL,
+                  PRIMARY KEY (`channel`)
+                ) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_bin;
+                SQL,
             ],
         ];
     }
 
-    public function getChannels() : array
+    private function normalize(string $ch): string
     {
-        if (is_null($this->channelsCache)) {
-            $this->channelsCache = $this->fetchChannelsFromDatabase();
-        }
-
-        return $this->channelsCache;
+        $ch = ltrim($ch, '#');
+        return '#'.strtolower($ch);
     }
 
-    protected function fetchChannelsFromDatabase()
+    public function getBeholdChannels(): array
     {
-        return $this->withDatabaseConnection(function (PDO $connectionResource) {
-            return $this->fetchChannels($connectionResource);
+        return $this->withDatabaseConnection(function (PDO $pdo) {
+            $stmt = $pdo->query('SELECT channel FROM behold_channels');
+            if ($stmt === false) throw new PdoPersistenceException($pdo);
+            return array_map([$this,'normalize'], $stmt->fetchAll(PDO::FETCH_COLUMN));
         });
     }
 
-    protected function fetchChannels(PDO $connectionResource)
+    public function addBeholdChannel(string $ch): array
     {
-        $channels = [];
-
-        $result = $connectionResource
-            ->query('SELECT `id`, `channel` FROM `core_channels`');
-
-        if (false === $result) {
-            throw new PdoPersistenceException($connectionResource);
-        }
-
-        while ($row = $result->fetch(PDO::FETCH_ASSOC)) {
-            $channels[(int)$row['id']] = strtolower($row['channel']);
-        }
-
-        return $channels;
-    }
-
-    public function addChannel(string $channelName) : array
-    {
-        return $this->withDatabaseConnection(function (PDO $connectionResource) use ($channelName) {
-            $statement = $connectionResource
-                ->prepare(
-                    <<< EOD
-                    INSERT INTO `core_channels`
-                    SET `channel` = :channel_name, `created_at` = :now, `updated_at` = :now
-                    EOD
-                );
-
-            $statement->bindValue('channel_name', $channelName);
-            $statement->bindValue('now', time());
-
-            try {
-                $statement->execute();
-            } catch (\Exception $exception) {
-                throw new PdoPersistenceException($connectionResource, $exception);
-            }
-
-            return $this->fetchChannels($connectionResource);
+        return $this->withDatabaseConnection(function (PDO $pdo) use ($ch) {
+            $ch = $this->normalize($ch);
+            $pdo->prepare(
+                'INSERT IGNORE INTO behold_channels(channel,created_at,updated_at)
+                 VALUES(:c,UNIX_TIMESTAMP(),UNIX_TIMESTAMP())'
+            )->execute(['c'=>$ch]);
+            return $this->getBeholdChannels();
         });
     }
 
-    public function removeChannel(string $channelName) : array
+    public function removeBeholdChannel(string $ch): array
     {
-        return $this->withDatabaseConnection(function (PDO $connectionResource) use ($channelName) {
-            $statement = $connectionResource
-                ->prepare(
-                    <<< EOD
-                    DELETE FROM `core_channels`
-                    WHERE `channel` = :channel_name
-                    EOD
-                );
+        return $this->withDatabaseConnection(function (PDO $pdo) use ($ch) {
+            $pdo->prepare('DELETE FROM behold_channels WHERE channel=:c')
+                ->execute(['c'=>$this->normalize($ch)]);
+            return $this->getBeholdChannels();
+        });
+    }
 
-            $statement->bindValue('channel_name', $channelName);
+    public function getChannels(): array
+    {
+        return $this->channelsCache ??= $this->fetchChannelsFromDb();
+    }
 
-            try {
-                $statement->execute();
-            } catch (\Exception $exception) {
-                throw new PdoPersistenceException($connectionResource, $exception);
+    public function refreshChannels(): array
+    {
+        return $this->channelsCache = $this->fetchChannelsFromDb();
+    }
+
+    public function addChannel(string $ch): array
+    {
+        return $this->withDatabaseConnection(function (PDO $pdo) use ($ch) {
+            $pdo->prepare(
+                'INSERT INTO core_channels SET channel=:c,created_at=:t,updated_at=:t'
+            )->execute(['c'=>$this->normalize($ch),'t'=>time()]);
+            return $this->refreshChannels();
+        });
+    }
+
+    public function removeChannel(string $ch): array
+    {
+        return $this->withDatabaseConnection(function (PDO $pdo) use ($ch) {
+            $pdo->prepare('DELETE FROM core_channels WHERE channel=:c')
+                ->execute(['c'=>$this->normalize($ch)]);
+            return $this->refreshChannels();
+        });
+    }
+
+    private function fetchChannelsFromDb(): array
+    {
+        return $this->withDatabaseConnection(function (PDO $pdo) {
+            $rows = [];
+            $stmt = $pdo->query('SELECT id,channel FROM core_channels');
+            if ($stmt === false) throw new PdoPersistenceException($pdo);
+            while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $rows[(int)$r['id']] = $this->normalize($r['channel']);
             }
-
-            return $this->fetchChannels($connectionResource);
+            return $rows;
         });
     }
 }

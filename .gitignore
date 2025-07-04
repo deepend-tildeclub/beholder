@@ -2,3 +2,4 @@ vendor
 .idea
 .env
 di.yml
+beholder.log

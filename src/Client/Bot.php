@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 
 namespace App\Client;
 
@@ -6,231 +7,157 @@ use App\ConfigurationInterface;
 use App\Modules\Behold\BeholdModule;
 use App\Modules\CommandList\CommandListModule;
 use App\Modules\Lottery\LotteryModule;
-use App\Modules\Quotes\Persistence\MySQL;
+use App\Modules\Quotes\Persistence\MySQL as QuotesMySQL;
 use App\Modules\Quotes\QuotesModule;
-use App\Modules\SimpleCommands\SimpleCommandsModule;
 use App\Persistence\Core\PersistenceInterface;
+use React\EventLoop\Loop;
 
 class Bot extends Client
 {
     protected ConfigurationInterface $config;
+    protected array                  $channels        = [];
+    protected array                  $beholdChannels  = [];
+    protected PersistenceInterface   $persistence;
+    protected array                  $modules         = [];
 
-    protected array $channels = [];
+    private bool $pendingChannelSync = false;
+    private bool $debug;
 
-    protected PersistenceInterface $persistence;
-
-    protected array $modules;
-
-    public function __construct(ConfigurationInterface $config, PersistenceInterface $persistence)
+    public function __construct(ConfigurationInterface $cfg,
+                                PersistenceInterface   $persistence)
     {
         parent::__construct(
-            $config->getDesiredNick(),
-            ($config->useTls() ? 'tls://' : '') . $config->getHost(),
-            $config->getPort(),
+            $cfg->getDesiredNick(),
+            ($cfg->useTls() ? 'tls://' : '') . $cfg->getHost(),
+            $cfg->getPort()
         );
 
+        $this->config      = $cfg;
         $this->persistence = $persistence;
-
-        $this->config = $config;
-
         $this->persistence->prepare();
+        $this->debug       = $cfg->isDebugMode();
 
-        $this->setName($config->getUsername());
-        $this->setRealName($config->getRealName());
-
+        $this->setName($cfg->getUsername());
+        $this->setRealName($cfg->getRealName());
         $this->reconnectInterval = 10;
 
-        $this->initializeChannelsList();
-
+        $this->initializeChannelLists();
         $this->registerConnectionHandlingListeners();
-
-        if ($config->isDebugMode()) {
-            $this->registerDebugListener();
-        }
-
         $this->registerChannelControlListeners();
 
+        if ($this->debug) {
+            $this->on('message', fn ($e) => print "[RAW-IN] {$e->raw}\n");
+        }
+
+        if (function_exists('pcntl_async_signals')) {
+            pcntl_async_signals(true);
+            pcntl_signal(SIGUSR1, fn () => $this->pendingChannelSync = true);
+        }
+        Loop::addPeriodicTimer(2, fn () => $this->pendingChannelSync && $this->syncChannelList());
+
+        $db = $cfg->getDatabaseCredentials();
         $this->modules = [
-            new SimpleCommandsModule($this, $config),
-            new CommandListModule($this, $config),
-            new QuotesModule(
-                $this,
-                $config,
-                new MySQL($config->getDatabaseCredentials()),
-            ),
-            new BeholdModule(
-                $this,
-                $config,
-                new \App\Modules\Behold\Persistence\MySQL($config->getDatabaseCredentials())
-            ),
+            new CommandListModule($this, $cfg),
+            new QuotesModule($this, $cfg, new QuotesMySQL($db)),
+            new BeholdModule($this, $cfg, new \App\Modules\Behold\Persistence\MySQL($db)),
         ];
-
-        $this->mapModules(function ($module) {
-            $module->prepare();
-        });
-
-        $this->mapModules(function ($module) {
-            $module->boot();
-        });
+        foreach ($this->modules as $m) { $m->prepare(); }
+        foreach ($this->modules as $m) { $m->boot();    }
     }
 
-    public function mapModules(callable $closure)
+    private function ensureHash(string $ch): string
     {
-        return array_map($closure, $this->modules);
+        return str_starts_with($ch, '#') ? $ch : "#{$ch}";
+    }
+    private function joinChannel(string $ch): void
+    {
+        $ch = $this->ensureHash($ch);
+        if ($this->debug) echo "[DBG-OUT] JOIN {$ch}\n";
+        parent::join($ch);
+    }
+    private function partChannel(string $ch): void
+    {
+        $ch = $this->ensureHash($ch);
+        if ($this->debug) echo "[DBG-OUT] PART {$ch}\n";
+        parent::part($ch);
     }
 
-    public function reduceModules(callable $closure, $initial = null)
+    private function syncChannelList(): void
     {
-        return array_reduce($this->modules, $closure, $initial);
+        $latest = method_exists($this->persistence, 'refreshChannels')
+            ? $this->persistence->refreshChannels()
+            : array_map('strtolower', $this->persistence->getChannels());
+
+        foreach (array_diff($latest, $this->channels) as $ch) { $this->join($ch); }
+        foreach (array_diff($this->channels, $latest) as $ch) { $this->part($ch); }
+
+        $this->channels = $latest;
+        $this->pmBotAdmin('Channel list reloaded (deferred)');
     }
 
-    protected function initializeChannelsList()
+    private function initializeChannelLists(): void
     {
-        $this->channels = $this->persistence->getChannels();
+        $this->channels       = array_map([$this,'ensureHash'],$this->persistence->getChannels());
+        $this->beholdChannels = array_map([$this,'ensureHash'],$this->persistence->getBeholdChannels());
     }
 
-    protected function registerConnectionHandlingListeners()
+    protected function registerConnectionHandlingListeners(): void
     {
-        $this->on('disconnected', function () { echo 'Disconnected.' . "\n"; });
-
-        $this->on('message:' . self::ERR_NICKNAMEINUSE, function ($event) {
-            $this->nick .= '_';
-            $this->nick();
-        });
-
-        // Identify if challenged
-        $this->on('notice:' . $this->getNick() . ':NickServ,pm:' . $this->getNick() . ':NickServ', function ($event) {
-            if (
-                false !== strpos(strtolower($event->text), 'is registered')
-                && false !== strpos(strtolower($event->text), 'identify via')
-            ) {
-                if (!$this->config->hasNickServAccount()) {
-                    $this->pmBotAdmin(
-                        'WARNING: Challenged to identify with NickServ, but no NickServ account details configured. Is this nick already taken?'
-                    );
-                    return;
-                }
-
-                $this->pm('NickServ', 'IDENTIFY ' . $this->config->getNickServAccountName() . ' ' . $this->config->getNickServPassword());
-            }
-        });
+        $this->on('disconnected', fn () => print "Disconnected.\n");
 
         $this->on('welcome', function () {
-            // Get our nick, if we can
-            if ($this->config->hasNickServAccount()) {
-                if ($this->nick != $this->config->getDesiredNick()) {
-                    $this->pm('NickServ', 'GHOST ' . $this->config->getNickServAccountName() . ' ' . $this->config->getNickServPassword());
-                    $this->pm('NickServ', 'RELEASE ' . $this->config->getNickServAccountName() . ' ' . $this->config->getNickServPassword());
-                    $this->nick($this->config->getDesiredNick());
-                }
-            }
-
-            // Join channels
-            foreach ($this->channels as $channel) {
-                $this->join($channel);
-            }
+            foreach ($this->channels as $ch) { $this->joinChannel($ch); }
         });
     }
 
-    protected function registerDebugListener()
+    protected function registerChannelControlListeners(): void
     {
-        $this->on('message', function ($event) {
-            echo $event->raw . "\n";
+        if (!$this->config->hasBotAdmin()) return;
+
+        $this->on('pm:' . $this->getNick() . ':' . $this->config->getBotAdminNick(),
+            function ($e) {
+                if (preg_match('/^please (?<a>join|leave|behold\+|behold-) (?<c>\S+) now$/', $e->text, $m)) {
+                    $ch = $this->ensureHash($m['c']);
+                    match($m['a']) {
+                        'join'      => $this->setUpChannel($ch),
+                        'leave'     => $this->tearDownChannel($ch),
+                        'behold+'   => $this->setUpBeholdChannel($ch),
+                        'behold-'   => $this->tearDownBeholdChannel($ch),
+                    };
+                }
         });
     }
 
-    protected function registerChannelControlListeners()
+    public function setUpChannel(string $ch): void
     {
-        if ($this->config->hasBotAdmin()) {
-            $this->on('pm:' . $this->getNick() . ':' . $this->config->getBotAdminNick(), function ($event) {
-                if (preg_match('/^please (?<action>join|leave) (?<channel>[^\s]+) now$/', $event->text, $matches)) {
-                    $action = $matches['action'];
-                    $channel = $matches['channel'];
-
-                    if (!$this->isChannel($channel)) {
-                        $this->pmBotAdmin($channel . ' is not a channel');
-                        return;
-                    }
-
-                    if ('join' === $action) {
-                        $this->setUpChannel($channel);
-                    } else if ('leave' === $action) {
-                        $this->tearDownChannel($channel);
-                    }
-                }
-
-                if ('mysql debug on' === $event->text) {
-                    $_ENV['MYSQL_DEBUG'] = true;
-                }
-
-                if ('mysql debug off' === $event->text) {
-                    $_ENV['MYSQL_DEBUG'] = false;
-                }
-            });
-        }
+        $ch = $this->ensureHash($ch);
+        if ($this->isBotMemberOfChannel($ch)) return;
+        $this->joinChannel($ch);
+        $this->channels = $this->persistence->addChannel($ch);
+    }
+    public function tearDownChannel(string $ch): void
+    {
+        $ch = $this->ensureHash($ch);
+        $this->partChannel($ch);
+        $this->channels = $this->persistence->removeChannel($ch);
     }
 
-    protected function setUpChannel($channel)
+    public function setUpBeholdChannel(string $ch): void
     {
-        if ($this->isBotMemberOfChannel($channel)) {
-            $this->pmBotAdmin('Already in ' . $channel);
-            return;
-        }
-
-        $this->pmBotAdmin('Joining ' . $channel);
-
-        $this->join($channel);
-
-        $this->channels = $this->persistence->addChannel($channel);
+        $ch = $this->ensureHash($ch);
+        if (in_array($ch, $this->beholdChannels, true)) return;
+        $this->beholdChannels = $this->persistence->addBeholdChannel($ch);
+    }
+    public function tearDownBeholdChannel(string $ch): void
+    {
+        $ch = $this->ensureHash($ch);
+        $this->beholdChannels = $this->persistence->removeBeholdChannel($ch);
     }
 
-    protected function tearDownChannel($channel)
+    public function isBotMemberOfChannel(string $ch): bool
     {
-        if (!$this->isBotMemberOfChannel($channel)) {
-            $this->pmBotAdmin('Not in ' . $channel);
-            return;
-        }
-
-        $this->pmBotAdmin('Leaving ' . $channel);
-
-        $this->part($channel);
-
-        $normalizedChannel = strtolower($channel);
-
-        foreach ($this->channels as $activeChannel) {
-            if (strtolower($activeChannel) === $normalizedChannel) {
-                $channelNameToRemove = $activeChannel;
-            }
-        }
-
-        $this->channels = $this->persistence->removeChannel($channelNameToRemove);
+        return in_array(strtolower($ch), array_map('strtolower',$this->channels), true);
     }
-
-    public function pmBotAdmin($message)
-    {
-        echo $message;
-
-        if (!$this->config->hasBotAdmin()) {
-            return;
-        }
-
-        // Remove new lines and carriage returns
-        $message = str_replace(["\r", "\n"], ' ', $message);
-
-        $this->pm(
-            $this->config->getBotAdminNick(),
-            $message,
-        );
-    }
-
-    public function isBotMemberOfChannel($channel): bool
-    {
-        if (!$this->isChannel($channel)) {
-            return false;
-        }
-
-        $normalizedChannels = array_map('strtolower', $this->channels);
-        $normalizedChannel = strtolower($channel);
-        return in_array($normalizedChannel, $normalizedChannels);
-    }
+    public function getChannels(): array       { return $this->channels;       }
+    public function getBeholdChannels(): array { return $this->beholdChannels; }
 }
