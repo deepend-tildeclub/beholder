@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Stats;
+namespace App\Modules\Behold\Stats;
 
 class StatTotals  implements StatsTotalsInterface
 {
@@ -26,5 +26,12 @@ class StatTotals  implements StatsTotalsInterface
     {
         // Just empty the _data array - leaving 0 values will generate useless queries otherwise
         $this->_data = [];
+    }
+
+    public function purgeChannel($channel)
+    {
+        foreach (array_keys($this->_data) as $type) {
+            unset($this->_data[$type][$channel]);
+        }
     }
 }

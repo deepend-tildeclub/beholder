@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Stats;
+namespace App\Modules\Behold\Stats;
 
 class MonologueMonitor
 {
@@ -21,5 +21,11 @@ class MonologueMonitor
     function is_becoming_monologue($channel)
     {
         return $this->_lastspoke_count[$channel] == 5;
+    }
+
+    public function purgeChannel($channel)
+    {
+        unset($this->_lastspoke_nick[$channel]);
+        unset($this->_lastspoke_count[$channel]);
     }
 }

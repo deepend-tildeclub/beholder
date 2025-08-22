@@ -1,15 +1,15 @@
 <?php
 
-namespace App\Persistence;
+namespace App\Modules\Behold\Persistence;
 
-use App\Stats\ActiveTimeTotals;
-use App\Stats\QuoteBuffer;
-use App\Stats\StatTotals;
-use App\Stats\TextStatsBuffer;
+use App\Modules\Behold\Stats\ActiveTimeTotals;
+use App\Modules\Behold\Stats\QuoteBuffer;
+use App\Modules\Behold\Stats\StatTotals;
+use App\Modules\Behold\Stats\TextStatsBuffer;
 
 interface PersistenceInterface
 {
-    public function __construct(array $options);
+    public function prepare(): void;
 
     public function persist(
         StatTotals $lineStatsBuffer,
@@ -19,8 +19,4 @@ interface PersistenceInterface
         array $channelList,
         array $ignoreList
     ) : bool;
-
-    public function getChannels() : array;
-
-    public function getIgnoredNicks() : array;
 }

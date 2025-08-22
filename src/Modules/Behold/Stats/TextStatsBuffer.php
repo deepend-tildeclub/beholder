@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Stats;
+namespace App\Modules\Behold\Stats;
 
 class TextStatsBuffer
 {
@@ -35,5 +35,12 @@ class TextStatsBuffer
     protected function escape($str)
     {
         return $str;
+    }
+
+    public function purgeChannel($channel)
+    {
+        foreach (array_keys($this->_data) as $nick) {
+            unset($this->_data[$nick][$channel]);
+        }
     }
 }
