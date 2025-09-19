@@ -85,11 +85,15 @@ class Bot extends Client
     private function syncChannelList(): void
     {
         $latest = method_exists($this->persistence, 'refreshChannels')
-            ? $this->persistence->refreshChannels()
-            : array_map('strtolower', $this->persistence->getChannels());
+            ? $this->persistence->refreshChannels()   // bust cache
+            : $this->persistence->getChannels();
 
-        foreach (array_diff($latest, $this->channels) as $ch) { $this->join($ch); }
-        foreach (array_diff($this->channels, $latest) as $ch) { $this->part($ch); }
+        foreach (array_diff($latest, $this->channels) as $ch) {
+            $this->joinChannel($ch);                  // uses debug wrapper
+        }
+        foreach (array_diff($this->channels, $latest) as $ch) {
+            $this->partChannel($ch);
+        }
 
         $this->channels = $latest;
         $this->pmBotAdmin('Channel list reloaded (deferred)');
