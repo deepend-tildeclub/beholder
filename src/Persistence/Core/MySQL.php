@@ -64,7 +64,7 @@ class MySQL extends Base implements PersistenceInterface
             $pdo->prepare(
                 'INSERT IGNORE INTO behold_channels(channel,created_at,updated_at)
                  VALUES(:c,UNIX_TIMESTAMP(),UNIX_TIMESTAMP())'
-            )->execute(['c'=>$ch]);
+            )->execute($this->utf8Params(['c'=>$ch]));
             return $this->getBeholdChannels();
         });
     }
@@ -73,7 +73,7 @@ class MySQL extends Base implements PersistenceInterface
     {
         return $this->withDatabaseConnection(function (PDO $pdo) use ($ch) {
             $pdo->prepare('DELETE FROM behold_channels WHERE channel=:c')
-                ->execute(['c'=>$this->normalize($ch)]);
+                ->execute($this->utf8Params(['c'=>$this->normalize($ch)]));
             return $this->getBeholdChannels();
         });
     }
@@ -93,7 +93,7 @@ class MySQL extends Base implements PersistenceInterface
         return $this->withDatabaseConnection(function (PDO $pdo) use ($ch) {
             $pdo->prepare(
                 'INSERT INTO core_channels SET channel=:c,created_at=:t,updated_at=:t'
-            )->execute(['c'=>$this->normalize($ch),'t'=>time()]);
+            )->execute($this->utf8Params(['c'=>$this->normalize($ch),'t'=>time()]));
             return $this->refreshChannels();
         });
     }
@@ -102,7 +102,7 @@ class MySQL extends Base implements PersistenceInterface
     {
         return $this->withDatabaseConnection(function (PDO $pdo) use ($ch) {
             $pdo->prepare('DELETE FROM core_channels WHERE channel=:c')
-                ->execute(['c'=>$this->normalize($ch)]);
+                ->execute($this->utf8Params(['c'=>$this->normalize($ch)]));
             return $this->refreshChannels();
         });
     }

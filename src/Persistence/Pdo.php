@@ -65,6 +65,9 @@ abstract class Pdo
                     'mysql:dbname=' . $this->database . ';host=' . $this->hostname . ';charset=utf8mb4',
                     $this->username,
                     $this->password,
+                    [
+                        \PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
+                    ]
                 );
             } catch (\PDOException $exception) {
                 sleep(5);
@@ -198,4 +201,38 @@ abstract class Pdo
             throw new PdoPersistenceException($connectionResource);
         }
     }
+
+    /**
+     * Normalize potentially non-UTF-8 input (e.g., CP-1252 smart quotes) to UTF-8.
+     * Use this on any user/IRC text before binding to SQL.
+     */
+    protected function utf8(string $s): string
+    {
+        // Fast UTF-8 validity check; valid strings pass through unchanged.
+        if (preg_match('//u', $s) === 1) {
+            return $s;
+        }
+        if (\function_exists('mb_convert_encoding')) {
+            return mb_convert_encoding($s, 'UTF-8', 'Windows-1252, ISO-8859-1');
+        }
+        if (\function_exists('iconv')) {
+            $r = @iconv('Windows-1252', 'UTF-8//TRANSLIT', $s);
+            return $r !== false ? $r : $s;
+        }
+        return $s;
+    }
+
+    /**
+     * Convenience: normalize only string values in a params array.
+     */
+    protected function utf8Params(array $params): array
+    {
+        foreach ($params as $k => $v) {
+            if (is_string($v)) {
+                $params[$k] = $this->utf8($v);
+            }
+        }
+        return $params;
+    }
+
 }

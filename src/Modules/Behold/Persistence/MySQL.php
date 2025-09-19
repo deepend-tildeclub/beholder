@@ -145,7 +145,7 @@ class MySQL extends Pdo implements PersistenceInterface
 
                             $statement->bindValue('type', $type);
                             $statement->bindValue('channel_id', $this->getChannelId($chan));
-                            $statement->bindValue('nickname', $this->normalizeNick($nick));
+                            $statement->bindValue('nickname', $this->utf8($this->normalizeNick($nick)));
                             $statement->bindValue('quantity', $quantity);
 
                             $statements[] = $statement;
@@ -180,7 +180,7 @@ class MySQL extends Pdo implements PersistenceInterface
                         );
 
                         $statement->bindValue('channel_id', $this->getChannelId($chan));
-                        $statement->bindValue('nickname', $this->normalizeNick($nick));
+                        $statement->bindValue('nickname', $this->utf8($this->normalizeNick($nick)));
                         $statement->bindValue('quantity_messages', $totals['messages']);
                         $statement->bindValue('quantity_words', $totals['words']);
                         $statement->bindValue('quantity_chars', $totals['chars']);
@@ -210,7 +210,7 @@ class MySQL extends Pdo implements PersistenceInterface
                             );
 
                             $statement->bindValue('channel_id', $this->getChannelId($chan));
-                            $statement->bindValue('nickname', $this->normalizeNick($nick));
+                            $statement->bindValue('nickname', $this->utf8($this->normalizeNick($nick)));
                             $statement->bindValue('hour', $hour);
                             $statement->bindValue('quantity', $quantity);
 
@@ -238,8 +238,8 @@ class MySQL extends Pdo implements PersistenceInterface
                         );
 
                         $statement->bindValue('channel_id', $this->getChannelId($chan));
-                        $statement->bindValue('nickname', $this->normalizeNick($nick));
-                        $statement->bindValue('quote', $quote);
+                        $statement->bindValue('nickname', $this->utf8($this->normalizeNick($nick)));
+                        $statement->bindValue('quote', $this->utf8($quote));
 
                         $statements[] = $statement;
                     }
@@ -344,7 +344,7 @@ class MySQL extends Pdo implements PersistenceInterface
                     SET `normalized_nick` = :nickname
                     EOD,
                 );
-                $statement->bindValue('nickname', $actualListNick);
+                $statement->bindValue('nickname', $this->utf8($actualListNick));
                 $statements[] = $statement;
             }
         }
@@ -357,7 +357,7 @@ class MySQL extends Pdo implements PersistenceInterface
                     WHERE `normalized_nick` = :nickname
                     EOD,
                 );
-                $statement->bindValue('nickname', $dbListNick);
+                $statement->bindValue('nickname', $this->utf8($dbListNick));
                 $statements[] = $statement;
             }
         }
@@ -376,7 +376,7 @@ class MySQL extends Pdo implements PersistenceInterface
                         EOD,
                     );
 
-                    $statement->bindValue('nickname', $actualListNick);
+                    $statement->bindValue('nickname', $this->utf8($actualListNick));
                     $statement->bindValue('channel_id', $this->getChannelId($channel));
 
                     $statements[] = $statement;
@@ -398,7 +398,7 @@ class MySQL extends Pdo implements PersistenceInterface
                         EOD,
                     );
 
-                    $statement->bindValue('nickname', $dbListNick);
+                    $statement->bindValue('nickname', $this->utf8($dbListNick));
                     $statement->bindValue('channel_id', $this->getChannelId($channel));
 
                     $statements[] = $statement;
