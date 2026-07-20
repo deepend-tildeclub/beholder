@@ -143,10 +143,10 @@ class MySQL extends Pdo implements PersistenceInterface
                                 EOD,
                             );
 
-                            $statement->bindValue('type', $type);
-                            $statement->bindValue('channel_id', $this->getChannelId($chan));
+                            $statement->bindValue('type', $type, \PDO::PARAM_INT);
+                            $statement->bindValue('channel_id', $this->getChannelId($chan), \PDO::PARAM_INT);
                             $statement->bindValue('nickname', $this->utf8($this->normalizeNick($nick)));
-                            $statement->bindValue('quantity', $quantity);
+                            $statement->bindValue('quantity', $quantity, \PDO::PARAM_INT);
 
                             $statements[] = $statement;
                         }
@@ -179,11 +179,11 @@ class MySQL extends Pdo implements PersistenceInterface
                             EOD
                         );
 
-                        $statement->bindValue('channel_id', $this->getChannelId($chan));
+                        $statement->bindValue('channel_id', $this->getChannelId($chan), \PDO::PARAM_INT);
                         $statement->bindValue('nickname', $this->utf8($this->normalizeNick($nick)));
-                        $statement->bindValue('quantity_messages', $totals['messages']);
-                        $statement->bindValue('quantity_words', $totals['words']);
-                        $statement->bindValue('quantity_chars', $totals['chars']);
+                        $statement->bindValue('quantity_messages', $totals['messages'], \PDO::PARAM_INT);
+                        $statement->bindValue('quantity_words', $totals['words'], \PDO::PARAM_INT);
+                        $statement->bindValue('quantity_chars', $totals['chars'], \PDO::PARAM_INT);
 
                         $statements[] = $statement;
                     }
@@ -209,10 +209,10 @@ class MySQL extends Pdo implements PersistenceInterface
                                 EOD,
                             );
 
-                            $statement->bindValue('channel_id', $this->getChannelId($chan));
+                            $statement->bindValue('channel_id', $this->getChannelId($chan), \PDO::PARAM_INT);
                             $statement->bindValue('nickname', $this->utf8($this->normalizeNick($nick)));
-                            $statement->bindValue('hour', $hour);
-                            $statement->bindValue('quantity', $quantity);
+                            $statement->bindValue('hour', $hour, \PDO::PARAM_INT);
+                            $statement->bindValue('quantity', $quantity, \PDO::PARAM_INT);
 
                             $statements[] = $statement;
                         }
@@ -237,7 +237,7 @@ class MySQL extends Pdo implements PersistenceInterface
                             EOD,
                         );
 
-                        $statement->bindValue('channel_id', $this->getChannelId($chan));
+                        $statement->bindValue('channel_id', $this->getChannelId($chan), \PDO::PARAM_INT);
                         $statement->bindValue('nickname', $this->utf8($this->normalizeNick($nick)));
                         $statement->bindValue('quote', $this->utf8($quote));
 
@@ -276,11 +276,14 @@ class MySQL extends Pdo implements PersistenceInterface
     ): void {
         $statements = [];
 
-        $normalizedChannelList = array_map('strtolower', $channelList);
+        // Normalize incoming channel list (lowercase, ensure leading '#')
+        $normalizedChannelList = array_map(function ($c) {
+            return $this->normalizeChannelName($c);
+        }, $channelList);
 
+        // Remove channels that disappeared
         foreach ($this->getChannels() as $cachedChannelId => $cachedChannelName) {
-            if (! in_array($cachedChannelName, $normalizedChannelList)) {
-                // This channel has been removed since we last persisted
+            if (! in_array($cachedChannelName, $normalizedChannelList, true)) {
                 foreach (
                     [
                         'DELETE FROM `behold_line_counts` WHERE `channel_id` = :channel_id',
@@ -290,31 +293,33 @@ class MySQL extends Pdo implements PersistenceInterface
                         'DELETE FROM `behold_channels` WHERE `id` = :channel_id',
                     ] as $sql
                 ) {
-                    $statements[] = $connectionResource
-                        ->prepare($sql)
-                        ->bindValue('channel_id', $cachedChannelId);
+                    $stmt = $connectionResource->prepare($sql);
+                    $stmt->bindValue('channel_id', (int)$cachedChannelId, \PDO::PARAM_INT);
+                    $statements[] = $stmt;
                 }
             }
         }
 
         $now = time();
 
+        // Upsert current channels
         foreach ($channelList as $channel) {
-            $statement = $connectionResource
-                ->prepare(
-                    <<< EOD
-                    INSERT INTO `behold_channels`
-                    SET
-                        `channel` = :channel_name,
-                        `created_at` = :now,
-                        `updated_at` = :now
-                    ON DUPLICATE KEY UPDATE
-                        `updated_at` = :now;
-                    EOD
-                );
+            $channelNorm = $this->normalizeChannelName($channel);
 
-            $statement->bindValue('channel_name', $channel);
-            $statement->bindValue('now', $now);
+            $statement = $connectionResource->prepare(
+                <<< EOD
+                INSERT INTO `behold_channels`
+                SET
+                    `channel` = :channel_name,
+                    `created_at` = :now,
+                    `updated_at` = :now
+                ON DUPLICATE KEY UPDATE
+                    `updated_at` = :now;
+                EOD
+            );
+
+            $statement->bindValue('channel_name', $channelNorm);
+            $statement->bindValue('now', $now, \PDO::PARAM_INT);
 
             $statements[] = $statement;
         }
@@ -372,12 +377,12 @@ class MySQL extends Pdo implements PersistenceInterface
                         <<< EOD
                         INSERT INTO `behold_ignored_nicks`
                         SET `normalized_nick` = :nickname,
-                        `channel_id` = :channel_id
+                            `channel_id` = :channel_id
                         EOD,
                     );
 
                     $statement->bindValue('nickname', $this->utf8($actualListNick));
-                    $statement->bindValue('channel_id', $this->getChannelId($channel));
+                    $statement->bindValue('channel_id', $this->getChannelId($channel), \PDO::PARAM_INT);
 
                     $statements[] = $statement;
                 }
@@ -394,12 +399,12 @@ class MySQL extends Pdo implements PersistenceInterface
                         <<< EOD
                         DELETE FROM `behold_ignored_nicks`
                         WHERE `normalized_nick` = :nickname
-                        AND `channel_id` = :channel_id
+                          AND `channel_id` = :channel_id
                         EOD,
                     );
 
                     $statement->bindValue('nickname', $this->utf8($dbListNick));
-                    $statement->bindValue('channel_id', $this->getChannelId($channel));
+                    $statement->bindValue('channel_id', $this->getChannelId($channel), \PDO::PARAM_INT);
 
                     $statements[] = $statement;
                 }
@@ -415,15 +420,49 @@ class MySQL extends Pdo implements PersistenceInterface
 
     public function getChannelId($channel) : int
     {
-        $channel = strtolower($channel);
+        // Accept with/without '#', case-insensitive
+        $needle = $this->normalizeChannelName($channel);
 
-        $result = array_search($channel, $this->getChannels());
+        $channels = $this->getChannels(); // [id => '#chan']
+        $result = array_search($needle, $channels, true);
 
-        if ($result === false) {
-            throw new PersistenceException('No such channel');
+        if ($result !== false) {
+            return (int) $result;
         }
 
-        return (int) $result;
+        // Last-chance: ensure DB has it (avoid transient "No such channel")
+        return $this->withDatabaseConnection(function (\PDO $pdo) use ($needle) : int {
+            $now = time();
+
+            $up = $pdo->prepare(
+                <<<SQL
+                INSERT INTO `behold_channels`
+                SET `channel` = :c, `created_at` = :now, `updated_at` = :now
+                ON DUPLICATE KEY UPDATE `updated_at` = :now
+                SQL
+            );
+            $up->bindValue('c', $needle);
+            $up->bindValue('now', $now, \PDO::PARAM_INT);
+            if (! $up->execute()) {
+                throw new PdoPersistenceException($pdo);
+            }
+
+            $sel = $pdo->prepare('SELECT `id` FROM `behold_channels` WHERE LOWER(`channel`) = :c LIMIT 1');
+            $sel->bindValue('c', $needle);
+            if (! $sel->execute()) {
+                throw new PdoPersistenceException($pdo);
+            }
+            $id = $sel->fetchColumn();
+
+            if ($id === false) {
+                throw new PersistenceException('No such channel');
+            }
+
+            // refresh cache so subsequent calls see it
+            $this->channelsCache = null;
+
+            return (int) $id;
+        });
     }
 
     protected function simpleQuery(\PDO $connectionResource, string $query): \PDOStatement
@@ -535,5 +574,23 @@ class MySQL extends Pdo implements PersistenceInterface
     protected function normalizeNick($nick) : string
     {
         return strtolower($nick);
+    }
+
+    /**
+     * Normalize channel names to a canonical, DB-matching form:
+     * - trim, lowercase
+     * - ensure leading channel prefix (default '#') if missing
+     */
+    protected function normalizeChannelName($channel): string
+    {
+        $c = strtolower(trim((string)$channel));
+        if ($c === '') {
+            return $c;
+        }
+        $first = $c[0];
+        if ($first !== '#' && $first !== '&' && $first !== '!' && $first !== '+') {
+            $c = '#' . $c;
+        }
+        return $c;
     }
 }
