@@ -53,7 +53,12 @@ class Bot extends Client
             pcntl_async_signals(true);
             pcntl_signal(SIGUSR1, fn () => $this->pendingChannelSync = true);
         }
-        Loop::addPeriodicTimer(2, fn () => $this->pendingChannelSync && $this->syncChannelList());
+        Loop::addPeriodicTimer(2, function () {
+            if ($this->pendingChannelSync) {
+                $this->pendingChannelSync = false;
+                $this->syncChannelList();
+            }
+        });
 
         $db = $cfg->getDatabaseCredentials();
         $this->modules = [
@@ -87,6 +92,8 @@ class Bot extends Client
         $latest = method_exists($this->persistence, 'refreshChannels')
             ? $this->persistence->refreshChannels()   // bust cache
             : $this->persistence->getChannels();
+
+        $latest = array_map([$this, 'ensureHash'], $latest);
 
         foreach (array_diff($latest, $this->channels) as $ch) {
             $this->joinChannel($ch);                  // uses debug wrapper

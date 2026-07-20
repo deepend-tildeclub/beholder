@@ -36,7 +36,7 @@ class Message {
         $len = count( $args );
         $last = $len - 1;
 
-        if( $len > 0 && ( strpos( ' ', $args[ $last ] ) !== -1 || $args[ $last ][ 0 ] === ':' ) ) {
+        if( $len > 0 && $args[ $last ] !== '' && ( strpos( $args[ $last ], ' ' ) !== false || $args[ $last ][ 0 ] === ':' ) ) {
 
             $args[ $last ] = ':'.$args[ $last ];
         }
@@ -65,7 +65,7 @@ class Message {
 
     public function getArg( $index, $defaultValue = null ) {
 
-        return !empty( $this->args[ $index ] ) ? $this->args[ $index ] : $defaultValue;
+        return array_key_exists( $index, $this->args ) ? $this->args[ $index ] : $defaultValue;
     }
 
     public static function parse( $message ) {
@@ -107,8 +107,7 @@ class Message {
 
             $args = array_values( array_filter( $args, function( $val ) {
 
-                $val = trim( $val );
-                return !empty( $val );
+                return trim( $val ) !== '';
             } ) );
         } else
             return new Message( 'UNKNOWN', array( $message ) );
