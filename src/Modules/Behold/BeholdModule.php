@@ -116,6 +116,16 @@ class BeholdModule implements BotModule
         }
     }
 
+    public function beginBeholding($channel): void
+    {
+        $this->startBeholding($channel);
+    }
+
+    public function endBeholding($channel): void
+    {
+        $this->stopBeholding($channel);
+    }
+
     protected function startBeholding($channel)
     {
         if (! $this->bot->isBotMemberOfChannel($channel)) {

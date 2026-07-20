@@ -96,6 +96,10 @@ final class ChannelApiServer
             return $this->json(200, ['removed' => "#{$ch}"]);
         }
 
+        if ($m === 'GET' && $p === '/behold') {
+            return $this->json(200, ['channels' => $this->bot->getBeholdChannels()]);
+        }
+
         if ($m === 'POST' && $p === '/behold') {
             $b = \json_decode((string) $req->getBody(), true);
             if (empty($b['channel'])) {

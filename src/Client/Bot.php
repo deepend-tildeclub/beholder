@@ -18,6 +18,7 @@ class Bot extends Client
     protected array                  $beholdChannels  = [];
     protected PersistenceInterface   $persistence;
     protected array                  $modules         = [];
+    private ?BeholdModule            $beholdModule    = null;
 
     private bool $debug;
 
@@ -53,10 +54,11 @@ class Bot extends Client
         }
 
         $db = $cfg->getDatabaseCredentials();
+        $this->beholdModule = new BeholdModule($this, $cfg, new \App\Modules\Behold\Persistence\MySQL($db));
         $this->modules = [
             new CommandListModule($this, $cfg),
             new QuotesModule($this, $cfg, new QuotesMySQL($db)),
-            new BeholdModule($this, $cfg, new \App\Modules\Behold\Persistence\MySQL($db)),
+            $this->beholdModule,
         ];
         foreach ($this->modules as $m) { $m->prepare(); }
         foreach ($this->modules as $m) { $m->boot();    }
@@ -155,11 +157,13 @@ class Bot extends Client
         $ch = $this->ensureHash($ch);
         if (in_array($ch, $this->beholdChannels, true)) return;
         $this->beholdChannels = $this->persistence->addBeholdChannel($ch);
+        $this->beholdModule?->beginBeholding($ch);
     }
     public function tearDownBeholdChannel(string $ch): void
     {
         $ch = $this->ensureHash($ch);
         $this->beholdChannels = $this->persistence->removeBeholdChannel($ch);
+        $this->beholdModule?->endBeholding($ch);
     }
 
     public function pmBotAdmin(string $message): void

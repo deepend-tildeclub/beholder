@@ -13,4 +13,10 @@ interface PersistenceInterface
     public function addChannel(string $channelName) : array;
 
     public function removeChannel(string $channelName) : array;
+
+    public function getBeholdChannels() : array;
+
+    public function addBeholdChannel(string $channelName) : array;
+
+    public function removeBeholdChannel(string $channelName) : array;
 }

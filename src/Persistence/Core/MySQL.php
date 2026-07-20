@@ -13,8 +13,10 @@ class MySQL extends Base implements PersistenceInterface
 
     public function prepare(): void
     {
-        $this->withDatabaseConnection(fn (PDO $pdo) =>
-            $this->checkSchema($pdo, 'core_schema_version'));
+        $this->withDatabaseConnection(function (PDO $pdo) {
+            $this->checkSchema($pdo, 'core_schema_version');
+            $this->ensureBeholdChannelsSchema($pdo);
+        });
     }
 
     protected function getSchema(): array
@@ -32,14 +34,25 @@ class MySQL extends Base implements PersistenceInterface
                 SQL,
                 <<<SQL
                 CREATE TABLE IF NOT EXISTS `behold_channels` (
+                  `id`         INT(11)      NOT NULL AUTO_INCREMENT,
                   `channel`    VARCHAR(255) UNIQUE NOT NULL,
                   `created_at` INT          NOT NULL,
                   `updated_at` INT          NOT NULL,
-                  PRIMARY KEY (`channel`)
+                  PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_bin;
                 SQL,
             ],
         ];
+    }
+
+    private function ensureBeholdChannelsSchema(PDO $pdo): void
+    {
+        $stmt = $pdo->query("SHOW COLUMNS FROM `behold_channels` LIKE 'id'");
+        if ($stmt === false) throw new PdoPersistenceException($pdo);
+        if ($stmt->rowCount() > 0) return;
+        if (!$pdo->query('ALTER TABLE `behold_channels` DROP PRIMARY KEY, ADD COLUMN `id` INT(11) NOT NULL AUTO_INCREMENT FIRST, ADD PRIMARY KEY (`id`)')) {
+            throw new PdoPersistenceException($pdo);
+        }
     }
 
     private function normalize(string $ch): string

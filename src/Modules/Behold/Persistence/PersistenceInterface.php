@@ -11,6 +11,8 @@ interface PersistenceInterface
 {
     public function prepare(): void;
 
+    public function getChannels() : array;
+
     public function persist(
         StatTotals $lineStatsBuffer,
         TextStatsBuffer $textStatsBuffer,
