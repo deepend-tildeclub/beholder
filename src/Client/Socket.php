@@ -56,7 +56,7 @@ class Socket extends EventEmitter {
 
     public function isConnected() {
 
-        return is_resource( $this->handle );
+        return is_resource( $this->handle ) && !feof( $this->handle );
     }
 
     public function send( $message ) {

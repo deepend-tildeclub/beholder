@@ -365,6 +365,10 @@ class Client extends Socket
 
     public function isChannel($nick)
     {
+        if ($nick === '') {
+            return false;
+        }
+
         return $this->inOptionValues('chantypes', $nick[0]);
     }
 
@@ -409,14 +413,24 @@ class Client extends Socket
                 break;
             }
 
-            $message = trim($this->receiveLine());
+            $message = $this->receiveLine();
 
-            if (empty($message)) {
+            if ($message === false) {
+                $this->disconnect();
+                continue;
+            }
+
+            $message = trim($message);
+
+            if ($message === '') {
                 continue;
             }
 
             $msg = Message::parse($message);
-            $this->emit("message, message:$msg->command", ['message' => $msg, 'raw' => trim($message)]);
+            if ($msg === null) {
+                continue;
+            }
+            $this->emit("message, message:$msg->command", ['message' => $msg, 'raw' => $message]);
             //slow this down a bit
             sleep($this->tickInterval);
         } while (true);
@@ -435,8 +449,7 @@ class Client extends Socket
         $args = func_get_args();
         unset($args[0]);
         $args = array_values(array_filter($args, function ($arg) {
-            $arg = trim($arg);
-            return !empty($arg);
+            return trim((string) $arg) !== '';
         }));
 
         $message = $command instanceof Message ? $command : new Message($command, $args);
@@ -460,8 +473,7 @@ class Client extends Socket
         unset($args[0]);
         unset($args[1]);
         $args = array_values(array_filter($args, function ($arg) {
-            $arg = trim($arg);
-            return !empty($arg);
+            return trim((string) $arg) !== '';
         }));
 
         $message = new Message($command, $args, $prefix);
@@ -672,12 +684,16 @@ class Client extends Socket
                 break;
             case self::RPL_NAMREPLY:
 
-                $namesReply = (object) [
-                    'nick' => $message->getArg(0),
-                    'channelType' => $message->getArg(1),
-                    'channel' => $message->getArg(2),
-                    'names' => array_map('trim', explode(' ', $message->getArg(3)))
-                ];
+                if (empty($namesReply)) {
+                    $namesReply = (object) [
+                        'nick' => $message->getArg(0),
+                        'channelType' => $message->getArg(1),
+                        'channel' => $message->getArg(2),
+                        'names' => []
+                    ];
+                }
+                $namesReply->names = array_merge($namesReply->names, array_map('trim', explode(' ', $message->getArg(3))));
+                break;
             case self::RPL_ENDOFNAMES:
 
                 if (empty($namesReply)) {

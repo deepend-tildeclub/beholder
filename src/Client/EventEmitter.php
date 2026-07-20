@@ -39,7 +39,8 @@ class EventEmitter {
                 break;
             }
 
-        array_splice( $this->eventCallbacks, $idx, 1 );
+        if( $idx !== null )
+            array_splice( $this->eventCallbacks[ $event ], $idx, 1 );
 
         return $this;
     }
