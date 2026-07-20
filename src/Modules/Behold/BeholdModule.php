@@ -66,7 +66,7 @@ class BeholdModule implements BotModule
 
     protected function initializeChannelsList()
     {
-        $this->channels = $this->persistence->getChannels();
+        $this->channels = $this->bot->getBeholdChannels();
     }
 
     protected function initializeBuffers()
@@ -128,9 +128,10 @@ class BeholdModule implements BotModule
             return;
         }
 
-        $this->bot->pmBotAdmin("I will begin beholding $channel");
+        $this->bot->setUpBeholdChannel($channel);
+        $this->channels = $this->bot->getBeholdChannels();
 
-        $this->channels[] = $channel;
+        $this->bot->pmBotAdmin("I will begin beholding $channel");
     }
 
     protected function stopBeholding($channel)
@@ -140,15 +141,10 @@ class BeholdModule implements BotModule
             return;
         }
 
+        $this->bot->tearDownBeholdChannel($channel);
+        $this->channels = $this->bot->getBeholdChannels();
+
         $this->bot->pmBotAdmin("From now on I will disregard $channel");
-
-        $normalizedChannel = strtolower($channel);
-
-        foreach ($this->channels as $key => $activeChannel) {
-            if (strtolower($activeChannel) === $normalizedChannel) {
-                unset($this->channels[$key]);
-            }
-        }
 
         $this->lineStatsBuffer->purgeChannel($channel);
         $this->textStatsBuffer->purgeChannel($channel);
@@ -208,6 +204,7 @@ class BeholdModule implements BotModule
             return false;
         }
 
+        $this->channels = $this->bot->getBeholdChannels();
         $normalizedChannels = array_map('strtolower', $this->channels);
         $normalizedChannel = strtolower($channel);
 
@@ -363,6 +360,8 @@ class BeholdModule implements BotModule
 
     protected function writeToDatabase()
     {
+        $this->channels = $this->bot->getBeholdChannels();
+
         if (time() - $this->lastWriteAt < $this->configuration->getWriteFrequencySeconds()) {
             return;
         }

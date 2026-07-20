@@ -10,7 +10,6 @@ use App\Modules\Lottery\LotteryModule;
 use App\Modules\Quotes\Persistence\MySQL as QuotesMySQL;
 use App\Modules\Quotes\QuotesModule;
 use App\Persistence\Core\PersistenceInterface;
-use React\EventLoop\Loop;
 
 class Bot extends Client
 {
@@ -20,7 +19,6 @@ class Bot extends Client
     protected PersistenceInterface   $persistence;
     protected array                  $modules         = [];
 
-    private bool $pendingChannelSync = false;
     private bool $debug;
 
     public function __construct(ConfigurationInterface $cfg,
@@ -51,14 +49,8 @@ class Bot extends Client
 
         if (function_exists('pcntl_async_signals')) {
             pcntl_async_signals(true);
-            pcntl_signal(SIGUSR1, fn () => $this->pendingChannelSync = true);
+            pcntl_signal(SIGUSR1, fn () => $this->syncSettings());
         }
-        Loop::addPeriodicTimer(2, function () {
-            if ($this->pendingChannelSync) {
-                $this->pendingChannelSync = false;
-                $this->syncChannelList();
-            }
-        });
 
         $db = $cfg->getDatabaseCredentials();
         $this->modules = [
@@ -87,23 +79,28 @@ class Bot extends Client
         parent::part($ch);
     }
 
-    private function syncChannelList(): void
+    private function syncSettings(): void
     {
         $latest = method_exists($this->persistence, 'refreshChannels')
-            ? $this->persistence->refreshChannels()   // bust cache
+            ? $this->persistence->refreshChannels()
             : $this->persistence->getChannels();
 
         $latest = array_map([$this, 'ensureHash'], $latest);
 
         foreach (array_diff($latest, $this->channels) as $ch) {
-            $this->joinChannel($ch);                  // uses debug wrapper
+            $this->joinChannel($ch);
         }
         foreach (array_diff($this->channels, $latest) as $ch) {
             $this->partChannel($ch);
         }
 
         $this->channels = $latest;
-        $this->pmBotAdmin('Channel list reloaded (deferred)');
+
+        if (method_exists($this->persistence, 'getBeholdChannels')) {
+            $this->beholdChannels = array_map([$this, 'ensureHash'], $this->persistence->getBeholdChannels());
+        }
+
+        $this->pmBotAdmin('Settings reloaded');
     }
 
     private function initializeChannelLists(): void
@@ -163,6 +160,12 @@ class Bot extends Client
     {
         $ch = $this->ensureHash($ch);
         $this->beholdChannels = $this->persistence->removeBeholdChannel($ch);
+    }
+
+    public function pmBotAdmin(string $message): void
+    {
+        if (!$this->config->hasBotAdmin()) return;
+        $this->pm($this->config->getBotAdminNick(), $message);
     }
 
     public function isBotMemberOfChannel(string $ch): bool

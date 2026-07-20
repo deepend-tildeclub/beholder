@@ -103,12 +103,14 @@ final class ChannelApiServer
             }
             $ch = $this->norm($b['channel']);
             $this->bot->setUpBeholdChannel($ch);
+            $this->signalParent();
             return $this->json(200, ['behold_added' => "#{$ch}"]);
         }
 
         if ($m === 'DELETE' && \str_starts_with($p, '/behold/')) {
             $ch = $this->norm(\substr($p, 8));
             $this->bot->tearDownBeholdChannel($ch);
+            $this->signalParent();
             return $this->json(200, ['behold_removed' => "#{$ch}"]);
         }
 
@@ -119,6 +121,7 @@ final class ChannelApiServer
             }
             $ch = $this->norm($b['channel']);
             $this->bot->tearDownBeholdChannel($ch);
+            $this->signalParent();
             return $this->json(200, ['behold_removed' => "#{$ch}"]);
         }
 
