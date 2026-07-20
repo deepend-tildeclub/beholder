@@ -80,6 +80,14 @@ class Socket extends EventEmitter {
 
     public function receiveLine() {
 
-        return fgets( $this->handle, $this->bufferSize );
+        $line = fgets( $this->handle, $this->bufferSize );
+        if( $line === false && is_resource( $this->handle ) ) {
+            $meta = stream_get_meta_data( $this->handle );
+            if( !empty( $meta[ 'timed_out' ] ) ) {
+                return '';
+            }
+        }
+
+        return $line;
     }
 }
